@@ -1,0 +1,15 @@
+# Ignore Python virtual environments
+myenv/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# VSCode / PyCharm settings (optional)
+.vscode/
+.idea/
+
+# Mac OS / Windows system files
+.DS_Store
+Thumbs.db

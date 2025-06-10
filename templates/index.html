@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Almond Line Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 100%;
+            margin: 0 auto;
+            padding: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+            overscroll-behavior: none; /* Prevent pull-to-refresh */
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 20px;
+        }
+        
+        .header h1 {
+            font-size: 2em;
+            margin-bottom: 5px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        
+        input[type="number"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+          /* Remove default styling on iOS */
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            padding: 15px 25px;
+            font-size: 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 5px;
+            transition: transform 0.2s, box-shadow 0.2s;
+            font-weight: bold;
+            width: 100%;
+            /* Remove default styling on iOS */
+            -webkit-tap-highlight-color: transparent; /* Remove tap highlight on iOS */
+        }
+        
+        .button:active {
+            transform: translateY(1px);
+            box-shadow: 0 2px 5px rgba(102, 126, 234, 0.4);
+        }
+        
+        .button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .button.success {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+        
+        .button.warning {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+        }
+        
+        .button.danger {
+            background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%);
+        }
+        
+        #video, #trainingVideo {
+            width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            margin: 10px 0;
+            transform: scaleX(-1); /* Mirror the camera for selfie mode */
+        }
+        
+        #canvas, #trainingCanvas {
+            display: none;
+        }
+        
+        .timer {
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            margin: 15px 0;
+            padding: 12px;
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+            color: white;
+            border-radius: 10px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+        }
+        
+        .result {
+            margin: 15px 0;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        
+        .result.success {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+        }
+        
+        .result.info {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .annotated-images {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin: 15px 0;
+        }
+        
+        .annotated-image {
+            width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+        
+        .image-label {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #555;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .tab-container {
+            display: flex;
+            margin-bottom: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 3px;
+        }
+        
+        .tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+            -webkit-tap-highlight-color: transparent; /* Remove tap highlight on iOS */
+        }
+        
+        .tab.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin: 15px 0;
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .stat-number {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+        
+        .training-history {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+        }
+        
+        .history-item {
+            padding: 10px;
+            margin: 5px 0;
+            background: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .controls-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+        }
+        
+        .status-indicator.active {
+            background: #4facfe;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-indicator.inactive {
+            background: #ccc;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+            transition: width 0.3s ease;
+        }
+        
+        .camera-permission-notice {
+            text-align: center;
+            padding: 10px;
+            background-color: #ffe0b2;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        
+        /* Prevent text selection */
+        * {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        
+        /* Allow text selection in input fields */
+        input {
+            -webkit-user-select: auto;
+            -moz-user-select: auto;
+            -ms-user-select: auto;
+            user-select: auto;
+        }
+        
+        /* Image caption style */
+        .image-caption {
+            font-size: 0.85em;
+            color: #ddd;
+            margin-top: 5px;
+            font-style: italic;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🫘 Choley Line Game</h1>
+        <p>Challenge your choley arranging skills!</p>
+        <div style="font-size: 0.9em; margin-top: 10px; background: rgba(255,255,255,0.2); padding: 10px; border-radius: 8px; text-align: left;">
+            <strong>Game Rules:</strong>
+            <ul style="margin: 5px 0; padding-left: 20px;">
+                <li>You have 60 seconds to arrange choley (chickpeas) in straight lines</li>
+                <li>Perfect lines with exactly 10 choley score 15 bonus points</li>
+                <li>Other valid lines (3+ choley) score 3 bonus points</li>
+                <li>Each choley placed scores 1 point</li>
+                <li>Points are deducted for lines that aren't perfectly straight!</li>
+            </ul>
+            <div style="margin-top: 8px; padding: 5px; background: rgba(255,255,255,0.3); border-radius: 5px;">
+                <strong>Important:</strong> Use a plain white paper background for best detection results!
+            </div>
+        </div>
+    </div>
+    
+    <div id="gameControls" class="card">
+        <div class="tab-container">
+            <button class="tab active" onclick="switchGameTab('game')">Game Mode</button>
+            <button class="tab" onclick="switchGameTab('stats')">Statistics</button>
+        </div>
+        
+        <div id="gameTab">
+            <div class="camera-permission-notice">
+                Please allow camera access when prompted
+            </div>
+            <div style="text-align: center;">
+                <div>
+                    <span class="status-indicator" id="gameStatus"></span>
+                    <span id="gameStatusText">Ready to start</span>
+                </div>
+                <video id="video" autoplay playsinline></video>
+                <canvas id="canvas"></canvas>
+                <div id="timer" class="timer">Time: 60s</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                </div>
+            </div>
+            
+            <div class="controls-grid">
+                <button id="startButton" class="button" onclick="startGame()">Start Game</button>
+                <button id="captureStartButton" class="button success" disabled onclick="captureStart()">Capture Start</button>
+                <button id="captureEndButton" class="button danger" disabled onclick="endGame()">End Game</button>
+            </div>
+            
+            <div id="result" class="result hidden"></div>
+        </div>
+        
+
+        
+        <div id="statsTab" class="hidden">
+            <div id="userStats">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number" id="totalGames">0</div>
+                        <div class="stat-label">Total Games</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="avgScore">0</div>
+                        <div class="stat-label">Average Score</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="bestScore">0</div>
+                        <div class="stat-label">Best Score</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="totalPerfectLines">0</div>
+                        <div class="stat-label">Perfect Lines</div>
+                    </div>
+                </div>
+            </div>
+            
+            <button class="button" onclick="loadUserStats()">Refresh Stats</button>
+        </div>
+    </div>
+
+    <script>
+        let stream;
+        let gameStartTime;
+        let timerInterval;
+        let progressInterval;
+        let isGameActive = false;
+        let currentGameTab = 'game';
+
+        // Tab switching function
+        function switchGameTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            document.getElementById('gameTab').classList.add('hidden');
+            document.getElementById('statsTab').classList.add('hidden');
+            
+            document.getElementById(tab + 'Tab').classList.remove('hidden');
+            currentGameTab = tab;
+            
+            if (tab === 'stats') {
+                loadUserStats();
+            } else if (tab === 'game' && !stream) {
+                setupCamera();
+            }
+        }
+
+        // Camera setup
+        async function setupCamera() {
+            try {
+                const constraints = { 
+                    video: { 
+                        facingMode: "environment", // Use back camera if available
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    } 
+                };
+                
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                document.getElementById('video').srcObject = stream;
+                updateGameStatus('active', 'Camera ready');
+                
+                // Hide camera permission notice
+                document.querySelector('#gameTab .camera-permission-notice').classList.add('hidden');
+            } catch (err) {
+                console.error('Error accessing camera:', err);
+                alert('Error accessing camera. Please grant camera permissions and reload the page.');
+                updateGameStatus('error', 'Camera error');
+            }
+        }
+
+        // Training camera setup removed
+
+        // Game status functions
+        function updateGameStatus(status, text) {
+            const indicator = document.getElementById('gameStatus');
+            const statusText = document.getElementById('gameStatusText');
+            
+            indicator.className = `status-indicator ${status === 'active' ? 'active' : 'inactive'}`;
+            statusText.textContent = text;
+        }
+
+        // Game functions
+        function startGame() {
+            document.getElementById('startButton').disabled = true;
+            document.getElementById('captureStartButton').disabled = false;
+            updateGameStatus('active', 'Ready to capture start photo');
+            showResult('Take a photo of your empty line in 10 seconds...', 'info');
+            
+            setTimeout(() => {
+                if (!isGameActive) {
+                    captureStart();
+                }
+            }, 10000);
+        }
+
+        function updateTimer() {
+            const now = Date.now();
+            const timeLeft = Math.max(0, Math.floor((gameStartTime + 60000 - now) / 1000));
+            document.getElementById('timer').textContent = `Time: ${timeLeft}s`;
+            
+            // Update progress bar
+            const progress = ((60 - timeLeft) / 60) * 100;
+            document.getElementById('progressFill').style.width = progress + '%';
+
+            if (timeLeft === 0 && isGameActive) {
+                endGame();
+            }
+        }
+
+        function captureImage(videoId = 'video', canvasId = 'canvas') {
+            const video = document.getElementById(videoId);
+            const canvas = document.getElementById(canvasId);
+            
+            // Make sure video dimensions are set
+            if (video.videoWidth === 0) {
+                alert('Camera not ready yet. Please try again.');
+                return null;
+            }
+            
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            // Draw the video frame to the canvas, handling mirrored video if needed
+            const ctx = canvas.getContext('2d');
+            
+            // For mirrored video, flip the canvas horizontally
+            if (video.style.transform && video.style.transform.includes('scaleX(-1)')) {
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+            }
+            
+            ctx.drawImage(video, 0, 0);
+            
+            // Reset transformation if we applied any
+            if (video.style.transform && video.style.transform.includes('scaleX(-1)')) {
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+            }
+            
+            return canvas.toDataURL('image/jpeg', 0.8); // Use 0.8 quality to reduce size
+        }
+
+        async function captureStart() {
+            const image = captureImage();
+            if (!image) return;
+            
+            try {
+                updateGameStatus('active', 'Processing start photo...');
+                
+                const response = await fetch('/api/start-game', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image }),
+                    credentials: 'same-origin'
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    isGameActive = true;
+                    gameStartTime = Date.now();
+                    document.getElementById('captureStartButton').disabled = true;
+                    document.getElementById('captureEndButton').disabled = false;
+                    updateGameStatus('active', 'Game in progress');
+                    
+                    // Show result with annotated image
+                    let resultHTML = `
+                        <h3>Game Started!</h3>
+                        <p>Detected ${data.start_count} choley at the start.</p>
+                        <p>You have 60 seconds to arrange choley in straight lines!</p>
+                        <p><strong>Goal:</strong> Create as many <u>perfectly straight</u> lines of 10 choley as possible.</p>
+                    `;
+                    
+                    if (data.annotated_image) {
+                        resultHTML += `
+                            <div class="annotated-images">
+                                <div class="image-label">Detected Objects:</div>
+                                <img src="data:image/jpeg;base64,${data.annotated_image}" class="annotated-image" alt="Detected objects">
+                            </div>
+                        `;
+                    }
+                    
+                    showResult(resultHTML, 'success');
+                    
+                    timerInterval = setInterval(updateTimer, 1000);
+                    
+                    setTimeout(() => {
+                        if (isGameActive) {
+                            endGame();
+                        }
+                    }, 60000);
+                } else {
+                    const error = await response.json();
+                    alert('Error starting game: ' + (error.error || 'Unknown error'));
+                    resetGame();
+                }
+            } catch (err) {
+                console.error('Error starting game:', err);
+                alert('Error starting game. Please check your connection and try again.');
+                resetGame();
+            }
+        }
+
+        async function endGame() {
+            if (!isGameActive) return;
+            
+            isGameActive = false;
+            clearInterval(timerInterval);
+            document.getElementById('captureEndButton').disabled = true;
+            updateGameStatus('active', 'Processing final photo');
+            showResult('Taking final photo in 5 seconds...', 'info');
+            
+            setTimeout(async () => {
+                const image = captureImage();
+                if (!image) {
+                    resetGame();
+                    return;
+                }
+                
+                try {
+                    updateGameStatus('active', 'Processing end photo...');
+                    
+                    const response = await fetch('/api/end-game', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ image }),
+                        credentials: 'same-origin'
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        
+                        // Create result HTML with annotated images and line detection
+                        let resultHTML = `
+                            <h3>🎉 Game Over!</h3>
+                            <p><strong>Choley Placed:</strong> ${result.end_count}</p>
+                        `;
+                        
+                        // Add line detection results
+                        if (result.total_lines > 0) {
+                            resultHTML += `
+                                <p><strong>Lines Detected:</strong> ${result.total_lines}</p>
+                                <p><strong>Perfect Lines (10 choley):</strong> ${result.perfect_lines}</p>
+                            `;
+                            
+                            // Show line counts if available
+                            if (result.line_counts && result.line_counts.length > 0) {
+                                resultHTML += `<p><strong>Choley per line:</strong> ${result.line_counts.join(', ')}</p>`;
+                            }
+                        } else {
+                            resultHTML += `<p><strong>No valid lines detected.</strong> Try placing choley in straighter lines.</p>`;
+                        }
+                        
+                        // Show score breakdown
+                        const perfectLineScore = result.perfect_lines * 15;
+                        const otherLineScore = (result.total_lines - result.perfect_lines) * 3;
+                        const riceScore = result.end_count;
+                        const straightnessPenalty = result.straightness_penalty || 0;
+                        
+                        resultHTML += `
+                            <div style="margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.2); border-radius: 8px;">
+                                <h4 style="margin-top: 0;">Score Breakdown:</h4>
+                                <p><strong>Perfect Lines:</strong> ${result.perfect_lines} × 15 = ${perfectLineScore} points</p>
+                                <p><strong>Other Lines:</strong> ${result.total_lines - result.perfect_lines} × 3 = ${otherLineScore} points</p>
+                                <p><strong>Total Choley:</strong> ${result.end_count} × 1 = ${riceScore} points</p>
+                                <p style="color: #ff6b6b;"><strong>Straightness Penalty:</strong> -${straightnessPenalty} points</p>
+                                <p style="font-size: 1.2em; margin-top: 10px;"><strong>Total Score:</strong> ${result.score} points</p>
+                            </div>
+                        `;
+                        
+                        // Add start image if available
+                        if (result.start_annotated_image) {
+                            resultHTML += `
+                                <div class="annotated-images">
+                                    <div class="image-label">Start Image (${result.start_count} choley):</div>
+                                    <img src="data:image/jpeg;base64,${result.start_annotated_image}" class="annotated-image" alt="Start image">
+                                </div>
+                            `;
+                        }
+                        
+                        // Add end image if available
+                        if (result.end_annotated_image) {
+                            resultHTML += `
+                                <div class="annotated-images">
+                                    <div class="image-label">End Image with Line Detection:</div>
+                                    <img src="data:image/jpeg;base64,${result.end_annotated_image}" class="annotated-image" alt="End image with lines">
+                                    <div class="image-caption">Lines of choley are shown in red, straighter lines score more points!</div>
+                                </div>
+                            `;
+                        }
+                        
+                        showResult(resultHTML, 'success');
+                        updateGameStatus('inactive', 'Game completed');
+                        resetGame();
+                        loadUserStats();
+                    } else {
+                        const error = await response.json();
+                        alert('Error ending game: ' + (error.error || 'Unknown error'));
+                        resetGame();
+                    }
+                } catch (err) {
+                    console.error('Error ending game:', err);
+                    alert('Error ending game. Please check your connection and try again.');
+                    resetGame();
+                }
+            }, 5000);
+        }
+
+        function resetGame() {
+            document.getElementById('startButton').disabled = false;
+            document.getElementById('captureStartButton').disabled = true;
+            document.getElementById('captureEndButton').disabled = true;
+            document.getElementById('timer').textContent = 'Time: 60s';
+            document.getElementById('progressFill').style.width = '0%';
+            updateGameStatus('inactive', 'Ready to start');
+        }
+
+        function showResult(message, type) {
+            const result = document.getElementById('result');
+            result.innerHTML = message;
+            result.className = `result ${type}`;
+            result.classList.remove('hidden');
+        }
+
+        // No training functions needed
+
+        // Stats functions
+        async function loadUserStats() {
+            try {
+                const response = await fetch('/api/user-stats', {
+                    credentials: 'same-origin'
+                });
+                
+                if (response.ok) {
+                    const stats = await response.json();
+                    
+                    const gameHistory = stats.game_history || [];
+                    
+                    document.getElementById('totalGames').textContent = gameHistory.length;
+                    
+                    if (gameHistory.length > 0) {
+                        // Calculate scores
+                        const scores = gameHistory.map(g => g.score);
+                        const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+                        const bestScore = Math.max(...scores);
+                        
+                        // Count perfect lines across all games
+                        let totalPerfectLines = 0;
+                        gameHistory.forEach(game => {
+                            if (game.perfect_lines) {
+                                totalPerfectLines += game.perfect_lines;
+                            }
+                        });
+                        
+                        // Update stats display
+                        document.getElementById('avgScore').textContent = Math.round(avgScore);
+                        document.getElementById('bestScore').textContent = Math.round(bestScore);
+                        document.getElementById('totalPerfectLines').textContent = totalPerfectLines;
+                    }
+                } else {
+                    console.error('Failed to load user stats');
+                }
+            } catch (err) {
+                console.error('Error loading user stats:', err);
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            // Setup camera when page loads
+            setupCamera();
+            
+            // Handle orientation changes
+            window.addEventListener('orientationchange', function() {
+                // Give the browser time to adjust
+                setTimeout(() => {
+                    if (stream) {
+                        document.getElementById('video').srcObject = stream;
+                    }
+                }, 300);
+            });
+        });
+    </script>
+</body>
+</html>
