@@ -2,6 +2,7 @@ import os
 import base64
 import cv2
 import numpy as np
+import tempfile
 import json
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, session
@@ -13,14 +14,14 @@ app.secret_key = os.urandom(24)
 CORS(app, supports_credentials=True)  # Enable credentials for cross-origin requests
 
 # Directories for storing images and training data
-UPLOAD_DIR = "game_photos"
-TRAINING_DIR = "training_data"
+UPLOAD_DIR = "/tmp/game_photos"
+TRAINING_DIR = "/tmp/training_data"
+
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(TRAINING_DIR, exist_ok=True)
 
 # File to store user stats
 STATS_FILE = os.path.join(TRAINING_DIR, "user_stats.json")
-
 # Load or create user stats
 def load_user_stats():
     if os.path.exists(STATS_FILE):
