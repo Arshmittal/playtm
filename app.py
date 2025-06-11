@@ -43,8 +43,12 @@ def get_session_id():
 
 
 
+import cv2
+import numpy as np
+import base64
+
 def process_image(image_data, return_image=False, detect_lines=False):
-    """Process image to detect real 3D choley objects (not drawings)"""
+    """Simplified and more reliable choley detection"""
     try:
         # Handle both full base64 string and raw base64 data
         if isinstance(image_data, str) and ',' in image_data:
@@ -60,157 +64,132 @@ def process_image(image_data, return_image=False, detect_lines=False):
         
         # Create a copy for visualization
         vis_img = img.copy()
-        original_img = img.copy()
         
-        # Convert to different color spaces
+        # Convert to grayscale
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
         
-        # Method 1: Shadow Detection (key for 3D objects)
-        # Real choley cast shadows on white background
-        # Detect shadows by finding darker regions
-        shadow_thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
-        shadow_mask = cv2.bitwise_not(shadow_thresh)  # Invert to get dark regions
+        # Method 1: Simple thresholding with multiple approaches
+        height, width = gray.shape
         
-        # Method 2: Gradient/Edge detection for 3D objects
-        # Real objects have gradual color transitions, not sharp edges
-        grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-        grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
-        gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
-        gradient_magnitude = np.uint8(gradient_magnitude / gradient_magnitude.max() * 255)
+        # Calculate background color (assume corners are background)
+        corners = [
+            gray[0:20, 0:20],           # Top-left
+            gray[0:20, width-20:width], # Top-right
+            gray[height-20:height, 0:20], # Bottom-left
+            gray[height-20:height, width-20:width] # Bottom-right
+        ]
+        background_values = [np.mean(corner) for corner in corners]
+        background_mean = np.mean(background_values)
         
-        # Create gradient mask for moderate gradients (not sharp pen lines)
-        gradient_mask = cv2.inRange(gradient_magnitude, 20, 100)  # Moderate gradients
+        print(f"Background mean: {background_mean}")
         
-        # Method 3: Color variation detection
-        # Real choley have color variations, not uniform colors like drawings
+        # Approach 1: Simple threshold based on background
+        # Choley are typically darker than white background
+        if background_mean > 200:  # White background
+            threshold_value = background_mean - 30  # Detect anything darker than background
+            _, thresh1 = cv2.threshold(gray, threshold_value, 255, cv2.THRESH_BINARY_INV)
+        else:  # Darker background
+            threshold_value = background_mean + 20
+            _, thresh1 = cv2.threshold(gray, threshold_value, 255, cv2.THRESH_BINARY)
         
-        # Split BGR channels
-        b, g, r = cv2.split(img)
+        # Approach 2: Adaptive thresholding
+        thresh2 = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            cv2.THRESH_BINARY_INV, 21, 10
+        )
         
-        # Calculate color variation (standard deviation in local regions)
-        kernel = np.ones((9, 9), np.float32) / 81
-        b_var = cv2.filter2D(b.astype(np.float32), -1, kernel)
-        g_var = cv2.filter2D(g.astype(np.float32), -1, kernel)
-        r_var = cv2.filter2D(r.astype(np.float32), -1, kernel)
+        # Approach 3: Otsu's thresholding
+        _, thresh3 = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         
-        # Areas with color variation (real objects) vs uniform areas (drawings/background)
-        color_std = np.std(np.stack([b, g, r], axis=-1), axis=-1)
-        color_variation_mask = (color_std > 5).astype(np.uint8) * 255
+        # Combine thresholding methods
+        combined_thresh = cv2.bitwise_or(thresh1, thresh2)
+        combined_thresh = cv2.bitwise_or(combined_thresh, thresh3)
         
-        # Method 4: Texture analysis using Local Binary Pattern concept
-        # Real choley have texture, drawings are smooth
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        texture_diff = cv2.absdiff(gray, blurred)
-        texture_mask = cv2.threshold(texture_diff, 3, 255, cv2.THRESH_BINARY)[1]
-        
-        # Method 5: Brightness variation (3D objects have highlights and shadows)
-        # Calculate local brightness statistics
-        kernel_large = np.ones((15, 15), np.float32) / 225
-        local_mean = cv2.filter2D(gray.astype(np.float32), -1, kernel_large)
-        brightness_diff = cv2.absdiff(gray.astype(np.float32), local_mean)
-        brightness_mask = (brightness_diff > 8).astype(np.uint8) * 255
-        
-        # Combine all methods with weights
-        # Focus on shadow detection and color variation (strongest indicators of 3D objects)
-        combined_mask = np.zeros_like(gray)
-        
-        # Add shadow information (most important)
-        combined_mask = cv2.add(combined_mask, shadow_mask * 0.4)
-        
-        # Add color variation (second most important)
-        combined_mask = cv2.add(combined_mask, color_variation_mask * 0.3)
-        
-        # Add brightness variation
-        combined_mask = cv2.add(combined_mask, brightness_mask * 0.2)
-        
-        # Add texture information
-        combined_mask = cv2.add(combined_mask, texture_mask * 0.1)
-        
-        # Convert to binary
-        combined_mask = (combined_mask > 30).astype(np.uint8) * 255
-        
-        # Morphological operations to clean up and connect nearby regions
+        # Apply light smoothing to reduce noise
         kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        kernel_medium = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        combined_thresh = cv2.morphologyEx(combined_thresh, cv2.MORPH_OPEN, kernel_small)
         
-        # Remove small noise
-        cleaned = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel_small)
-        # Connect nearby regions
-        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_medium)
-        # Fill holes
-        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_medium)
+        # Apply closing to fill small gaps
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        combined_thresh = cv2.morphologyEx(combined_thresh, cv2.MORPH_CLOSE, kernel_close)
         
-        # Distance transform to find centers of objects
-        dist_transform = cv2.distanceTransform(cleaned, cv2.DIST_L2, 5)
+        # Find contours
+        contours, _ = cv2.findContours(combined_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        # Find local maxima (centers of choley)
-        local_maxima = cv2.dilate(dist_transform, kernel_small)
-        local_maxima = (dist_transform == local_maxima) & (dist_transform > 5)
+        print(f"Found {len(contours)} contours")
         
-        # Find contours from the cleaned mask
-        contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # More lenient parameters for choley detection
+        min_area = 30       # Smaller minimum area
+        max_area = 5000     # Larger maximum area
+        min_width = 8       # Minimum width
+        max_width = 100     # Maximum width
+        min_height = 8      # Minimum height
+        max_height = 100    # Maximum height
         
-        # Parameters for real choley (more lenient for 3D objects)
-        min_area = 80      # Minimum area for choley
-        max_area = 3000    # Maximum area for choley
-        min_circularity = 0.2  # Very flexible for 3D objects
-        max_circularity = 1.0
-        
-        # Filter contours
+        # Filter contours by size and basic shape
         seed_count = 0
         valid_contours = []
         centers = []
         
-        for contour in contours:
+        for i, contour in enumerate(contours):
             area = cv2.contourArea(contour)
             
-            if min_area < area < max_area:
-                # Calculate basic shape properties
-                perimeter = cv2.arcLength(contour, True)
-                if perimeter == 0:
-                    continue
-                    
-                circularity = 4 * np.pi * area / (perimeter * perimeter)
-                
-                # Get bounding rectangle
-                x, y, w, h = cv2.boundingRect(contour)
-                aspect_ratio = float(w) / h if h > 0 else 0
-                
-                # Calculate compactness
-                hull = cv2.convexHull(contour)
-                hull_area = cv2.contourArea(hull)
-                solidity = area / hull_area if hull_area > 0 else 0
-                
-                # Check if this region has the characteristics of a 3D object
-                # Extract the region for analysis
-                mask = np.zeros(gray.shape, dtype=np.uint8)
-                cv2.fillPoly(mask, [contour], 255)
-                region_mean = cv2.mean(gray, mask=mask)[0]
-                
-                # Real choley should have:
-                # 1. Reasonable shape properties
-                # 2. Not be too dark (like pen marks) or too bright (like paper)
-                # 3. Have some color/brightness variation
-                
-                if (circularity > min_circularity and
-                    0.3 < aspect_ratio < 3.0 and  # Not too elongated
-                    solidity > 0.6 and  # Reasonably solid shape
-                    80 < region_mean < 220):  # Not pure black (pen) or pure white (paper)
-                    
-                    seed_count += 1
-                    valid_contours.append(contour)
-                    
-                    # Calculate center
-                    M = cv2.moments(contour)
-                    if M["m00"] != 0:
-                        cX = int(M["m10"] / M["m00"])
-                        cY = int(M["m01"] / M["m00"])
-                    else:
-                        cX, cY = x + w // 2, y + h // 2
-                    
-                    centers.append((cX, cY))
+            if area < min_area or area > max_area:
+                continue
+            
+            # Get bounding rectangle
+            x, y, w, h = cv2.boundingRect(contour)
+            
+            # Check size constraints
+            if (w < min_width or w > max_width or 
+                h < min_height or h > max_height):
+                continue
+            
+            # Check aspect ratio (not too elongated)
+            aspect_ratio = float(w) / h if h > 0 else 0
+            if aspect_ratio < 0.2 or aspect_ratio > 5.0:
+                continue
+            
+            # Calculate some basic shape properties
+            perimeter = cv2.arcLength(contour, True)
+            if perimeter == 0:
+                continue
+            
+            # Calculate circularity (4π×Area)/(perimeter²)
+            circularity = 4 * np.pi * area / (perimeter * perimeter)
+            
+            # Very lenient circularity check
+            if circularity < 0.1:  # Very low threshold
+                continue
+            
+            # Check if the contour is not just noise
+            # Look at the intensity values in the region
+            mask = np.zeros(gray.shape, dtype=np.uint8)
+            cv2.fillPoly(mask, [contour], 255)
+            
+            # Get mean intensity of the region
+            region_mean = cv2.mean(gray, mask=mask)[0]
+            
+            # Skip if region is too similar to background (likely noise)
+            intensity_diff = abs(region_mean - background_mean)
+            if intensity_diff < 5:  # Very small difference from background
+                continue
+            
+            # This looks like a valid choley
+            seed_count += 1
+            valid_contours.append(contour)
+            
+            # Calculate center
+            M = cv2.moments(contour)
+            if M["m00"] != 0:
+                cX = int(M["m10"] / M["m00"])
+                cY = int(M["m01"] / M["m00"])
+            else:
+                cX, cY = x + w // 2, y + h // 2
+            
+            centers.append((cX, cY))
+            
+            print(f"Choley {seed_count}: area={area:.1f}, circularity={circularity:.3f}, intensity_diff={intensity_diff:.1f}")
         
         # Initialize line detection results
         lines_detected = []
@@ -220,42 +199,51 @@ def process_image(image_data, return_image=False, detect_lines=False):
         if detect_lines and len(centers) >= 3:
             lines_detected, line_counts = detect_seed_lines(centers, vis_img)
         
-        # Draw detection results on visualization image
+        # Draw detection results
         for i, contour in enumerate(valid_contours):
-            # Draw contour
+            # Draw contour in green
             cv2.drawContours(vis_img, [contour], 0, (0, 255, 0), 2)
             
-            # Get center
-            M = cv2.moments(contour)
-            if M["m00"] != 0:
-                cX = int(M["m10"] / M["m00"])
-                cY = int(M["m01"] / M["m00"])
-            else:
-                x, y, w, h = cv2.boundingRect(contour)
-                cX, cY = x + w // 2, y + h // 2
+            # Get center and bounding rectangle
+            x, y, w, h = cv2.boundingRect(contour)
+            cX, cY = x + w // 2, y + h // 2
             
-            # Draw center point
-            cv2.circle(vis_img, (cX, cY), 4, (255, 0, 0), -1)
+            # Draw center point in blue
+            cv2.circle(vis_img, (cX, cY), 3, (255, 0, 0), -1)
             
             # Draw number label
             cv2.putText(
                 vis_img, 
                 str(i + 1),
-                (cX - 10, cY - 15),
+                (cX - 8, cY + 5),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
+                0.5,
                 (255, 0, 0),
                 2
             )
+            
+            # Draw bounding rectangle for debugging
+            cv2.rectangle(vis_img, (x, y), (x + w, y + h), (0, 255, 255), 1)
         
-        # Add count to image
+        # Add detection info to image
         cv2.putText(vis_img, f"Choley detected: {seed_count}", (10, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
         
-        # Debug: Show what the algorithm is detecting
+        cv2.putText(vis_img, f"Background: {background_mean:.1f}", (10, 60), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
+        
+        # Debug information
         if seed_count == 0:
-            cv2.putText(vis_img, "Try: Better lighting, cleaner background", (10, 60), 
+            cv2.putText(vis_img, "No choley detected. Try:", (10, 90), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
+            cv2.putText(vis_img, "- Better lighting", (10, 110), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+            cv2.putText(vis_img, "- Cleaner background", (10, 130), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+            cv2.putText(vis_img, "- Spread choley apart", (10, 150), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        
+        print(f"Final detection: {seed_count} choley found")
         
         if return_image:
             # Convert the visualization image to base64
@@ -272,6 +260,8 @@ def process_image(image_data, return_image=False, detect_lines=False):
         
     except Exception as e:
         print(f"Error processing image: {str(e)}")
+        import traceback
+        traceback.print_exc()
         if return_image:
             if detect_lines:
                 return 0, None, [], []
