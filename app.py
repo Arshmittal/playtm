@@ -2,7 +2,7 @@ import os
 import base64
 import cv2
 import numpy as np
-import tempfile
+import tempfile   
 import json
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, session
@@ -59,39 +59,126 @@ def process_image(image_data, return_image=False, detect_lines=False):
         # Create a copy for visualization
         vis_img = img.copy()
         
-        # Convert to grayscale
+        # Try color-based detection for real choley (typically beige/brown)
+        # Convert to HSV color space
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        
+        # Define multiple color ranges for choley (beige/brown/yellow)
+        # These ranges may need adjustment based on lighting conditions
+        
+        # Define range for beige/light brown color
+        lower_beige = np.array([10, 20, 100])  # Lower bound for beige
+        upper_beige = np.array([30, 150, 255])  # Upper bound for beige
+        
+        # Define range for darker brown color
+        lower_brown = np.array([0, 50, 50])  # Lower bound for brown
+        upper_brown = np.array([20, 255, 150])  # Upper bound for brown
+        
+        # Define range for yellowish color
+        lower_yellow = np.array([20, 100, 100])  # Lower bound for yellow
+        upper_yellow = np.array([40, 255, 255])  # Upper bound for yellow
+        
+        # Create masks for each color range
+        beige_mask = cv2.inRange(hsv, lower_beige, upper_beige)
+        brown_mask = cv2.inRange(hsv, lower_brown, upper_brown)
+        yellow_mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
+        
+        # Combine all color masks
+        color_mask = cv2.bitwise_or(beige_mask, brown_mask)
+        color_mask = cv2.bitwise_or(color_mask, yellow_mask)
+        
+        # Create a small visualization of the color mask in the corner of the image
+        mask_small = cv2.resize(color_mask, (160, 120))
+        # Convert to 3 channels to overlay on the color image
+        mask_small_color = cv2.cvtColor(mask_small, cv2.COLOR_GRAY2BGR)
+        # Place the mask visualization in the top-right corner
+        vis_img[10:130, vis_img.shape[1]-170:vis_img.shape[1]-10] = mask_small_color
+        
+        # Convert to grayscale for traditional processing
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         
-        # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        # Apply histogram equalization to enhance contrast
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray = clahe.apply(gray)
         
-        # Apply adaptive thresholding
-        thresh = cv2.adaptiveThreshold(
+        # Combine color mask with grayscale processing
+        combined_mask = cv2.bitwise_or(gray, color_mask)
+        
+        # Apply Gaussian blur to reduce noise
+        blurred = cv2.GaussianBlur(combined_mask, (7, 7), 0)
+        
+        # Apply a combination of thresholding methods for better detection
+        # First try adaptive thresholding
+        adaptive_thresh = cv2.adaptiveThreshold(
             blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-            cv2.THRESH_BINARY_INV, 11, 2
+            cv2.THRESH_BINARY_INV, 21, 5  # Increased block size and constant for better contrast
         )
+        
+        # Also try Otsu's thresholding as a backup
+        _, otsu_thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        
+        # Combine both thresholds to improve detection
+        thresh = cv2.bitwise_or(adaptive_thresh, otsu_thresh)
+        
+        # Apply morphological operations to clean up the threshold
+        kernel = np.ones((3, 3), np.uint8)
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        
+        # Create a small visualization of the threshold in the corner of the image
+        thresh_small = cv2.resize(thresh, (160, 120))
+        # Convert to 3 channels to overlay on the color image
+        thresh_small_color = cv2.cvtColor(thresh_small, cv2.COLOR_GRAY2BGR)
+        # Place the threshold visualization in the top-right corner, below the mask
+        vis_img[140:260, vis_img.shape[1]-170:vis_img.shape[1]-10] = thresh_small_color
         
         # Find contours
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         # Parameters optimized for choley (chickpeas) on white background
         # Choley are larger and more circular than rice
-        min_area = 100  # Larger minimum area for choley
-        max_area = 1500  # Larger maximum area for choley
-        min_circularity = 0.4  # Higher circularity for round choley
-        max_circularity = 0.9  # Higher max circularity for round shapes
+        min_area = 30  # Further reduced minimum area to detect smaller choley
+        max_area = 5000  # Further increased maximum area for larger choley
+        min_circularity = 0.2  # Further reduced minimum circularity for real choley which may not be perfectly round
+        max_circularity = 1.0  # Maximum circularity to include all possible shapes
         
         # Filter contours by size and shape to count seeds
         seed_count = 0
         valid_contours = []
         centers = []  # Store centers for line detection
         
+        # Add debug text to the visualization image
+        cv2.putText(
+            vis_img,
+            f"Total contours: {len(contours)}",
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 0, 255),
+            2
+        )
+        
         for contour in contours:
             area = cv2.contourArea(contour)
+            perimeter = cv2.arcLength(contour, True)
+            circularity = 4 * np.pi * area / (perimeter * perimeter) if perimeter > 0 else 0
+            
+            # Get bounding rect for debug info
+            x, y, w, h = cv2.boundingRect(contour)
+            
+            # Add area and circularity info near each contour (for larger contours only)
+            if area > 50:
+                cv2.putText(
+                    vis_img,
+                    f"A:{int(area)}, C:{circularity:.2f}",
+                    (x, y - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.4,
+                    (255, 0, 255),
+                    1
+                )
+            
             if min_area < area < max_area:
-                perimeter = cv2.arcLength(contour, True)
-                circularity = 4 * np.pi * area / (perimeter * perimeter) if perimeter > 0 else 0
-                
                 if min_circularity < circularity < max_circularity:
                     seed_count += 1
                     valid_contours.append(contour)
@@ -103,7 +190,6 @@ def process_image(image_data, return_image=False, detect_lines=False):
                         cY = int(M["m01"] / M["m00"])
                     else:
                         # Fallback if moments calculation fails
-                        x, y, w, h = cv2.boundingRect(contour)
                         cX, cY = x + w // 2, y + h // 2
                     
                     centers.append((cX, cY))
@@ -117,9 +203,33 @@ def process_image(image_data, return_image=False, detect_lines=False):
             # Group centers into lines
             lines_detected, line_counts = detect_seed_lines(centers, vis_img)
         
-        # Draw contours and labels on the visualization image
+        # Draw all detected contours in red (for debugging)
+        cv2.drawContours(vis_img, contours, -1, (0, 0, 255), 1)
+        
+        # Add detection parameters to the visualization image
+        cv2.putText(
+            vis_img,
+            f"Valid contours: {len(valid_contours)}",
+            (10, 60),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 0),
+            2
+        )
+        
+        cv2.putText(
+            vis_img,
+            f"Area range: {min_area}-{max_area}, Circ: {min_circularity:.1f}-{max_circularity:.1f}",
+            (10, 90),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 0, 0),
+            2
+        )
+        
+        # Draw valid contours and labels on the visualization image
         for i, contour in enumerate(valid_contours):
-            # Draw contour
+            # Draw valid contour in green
             cv2.drawContours(vis_img, [contour], 0, (0, 255, 0), 2)
             
             # Get center of contour for label placement
@@ -497,9 +607,18 @@ def detect_seeds():
         # Process the image to count choley and get annotated image
         choley_count, annotated_image = process_image(image_data, return_image=True)
         
+        # Add debug information to the response
         return jsonify({
             "count": choley_count,
-            "annotated_image": annotated_image
+            "annotated_image": annotated_image,
+            "debug_info": {
+                "detection_parameters": {
+                    "min_area": 30,  # Should match the values in process_image
+                    "max_area": 5000,
+                    "min_circularity": 0.2,
+                    "max_circularity": 1.0
+                }
+            }
         })
     except Exception as e:
         return jsonify({"error": f"Failed to process image: {str(e)}"}), 500
