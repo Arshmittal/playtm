@@ -41,8 +41,12 @@ def get_session_id():
         session['user_id'] = f"anonymous_{datetime.now().strftime('%Y%m%d%H%M%S')}_{os.urandom(4).hex()}"
     return session['user_id']
 
+import cv2
+import numpy as np
+import base64
+
 def process_image(image_data, return_image=False, detect_lines=False):
-    """Process base64 image data and detect choley and lines"""
+    """Improved process image function optimized for real choley detection"""
     try:
         # Handle both full base64 string and raw base64 data
         if isinstance(image_data, str) and ',' in image_data:
@@ -59,40 +63,102 @@ def process_image(image_data, return_image=False, detect_lines=False):
         # Create a copy for visualization
         vis_img = img.copy()
         
-        # Convert to grayscale
+        # Convert to different color spaces for better detection
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
         
-        # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        # Method 1: Enhanced contrast and edge detection
+        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        enhanced = clahe.apply(gray)
         
-        # Apply adaptive thresholding
-        thresh = cv2.adaptiveThreshold(
-            blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-            cv2.THRESH_BINARY_INV, 11, 2
+        # Apply different types of blurring
+        gaussian_blur = cv2.GaussianBlur(enhanced, (3, 3), 0)
+        median_blur = cv2.medianBlur(enhanced, 3)
+        
+        # Method 2: Multiple threshold techniques
+        # Otsu's thresholding
+        _, otsu_thresh = cv2.threshold(gaussian_blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        
+        # Adaptive thresholding with different parameters
+        adaptive_thresh1 = cv2.adaptiveThreshold(
+            median_blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            cv2.THRESH_BINARY_INV, 15, 3
         )
         
+        adaptive_thresh2 = cv2.adaptiveThreshold(
+            median_blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, 
+            cv2.THRESH_BINARY_INV, 21, 5
+        )
+        
+        # Method 3: Color-based detection for choley
+        # Choley typically has yellowish-brown color
+        lower_choley = np.array([10, 30, 30])  # Lower HSV range for choley
+        upper_choley = np.array([30, 255, 255])  # Upper HSV range for choley
+        color_mask = cv2.inRange(hsv, lower_choley, upper_choley)
+        
+        # Method 4: Edge detection
+        edges = cv2.Canny(enhanced, 30, 100)
+        
+        # Combine different thresholding methods
+        combined_thresh = cv2.bitwise_or(otsu_thresh, adaptive_thresh1)
+        combined_thresh = cv2.bitwise_or(combined_thresh, adaptive_thresh2)
+        
+        # If color detection found something, include it
+        if np.sum(color_mask) > 0:
+            combined_thresh = cv2.bitwise_or(combined_thresh, color_mask)
+        
+        # Morphological operations to clean up the image
+        kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        kernel_medium = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        
+        # Remove noise
+        cleaned = cv2.morphologyEx(combined_thresh, cv2.MORPH_OPEN, kernel_small)
+        # Fill holes
+        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_medium)
+        
         # Find contours
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        # Parameters optimized for choley (chickpeas) on white background
-        # Choley are larger and more circular than rice
-        min_area = 100  # Larger minimum area for choley
-        max_area = 1500  # Larger maximum area for choley
-        min_circularity = 0.4  # Higher circularity for round choley
-        max_circularity = 0.9  # Higher max circularity for round shapes
+        # More flexible parameters for real choley detection
+        min_area = 50    # Reduced minimum area
+        max_area = 2000  # Increased maximum area
+        min_circularity = 0.3   # More flexible circularity
+        max_circularity = 1.0   # Allow perfect circles
+        min_aspect_ratio = 0.6  # Aspect ratio check
+        max_aspect_ratio = 1.7  # Allow slightly oval shapes
         
-        # Filter contours by size and shape to count seeds
+        # Filter contours by multiple criteria
         seed_count = 0
         valid_contours = []
-        centers = []  # Store centers for line detection
+        centers = []
         
         for contour in contours:
             area = cv2.contourArea(contour)
+            
             if min_area < area < max_area:
+                # Calculate circularity
                 perimeter = cv2.arcLength(contour, True)
-                circularity = 4 * np.pi * area / (perimeter * perimeter) if perimeter > 0 else 0
+                if perimeter > 0:
+                    circularity = 4 * np.pi * area / (perimeter * perimeter)
+                else:
+                    continue
                 
-                if min_circularity < circularity < max_circularity:
+                # Calculate aspect ratio
+                x, y, w, h = cv2.boundingRect(contour)
+                aspect_ratio = float(w) / h if h > 0 else 0
+                
+                # Calculate solidity (how "filled" the shape is)
+                hull = cv2.convexHull(contour)
+                hull_area = cv2.contourArea(hull)
+                solidity = area / hull_area if hull_area > 0 else 0
+                
+                # More comprehensive shape analysis
+                if (min_circularity < circularity < max_circularity and
+                    min_aspect_ratio < aspect_ratio < max_aspect_ratio and
+                    solidity > 0.7):  # Should be reasonably "solid"
+                    
                     seed_count += 1
                     valid_contours.append(contour)
                     
@@ -102,8 +168,6 @@ def process_image(image_data, return_image=False, detect_lines=False):
                         cX = int(M["m10"] / M["m00"])
                         cY = int(M["m01"] / M["m00"])
                     else:
-                        # Fallback if moments calculation fails
-                        x, y, w, h = cv2.boundingRect(contour)
                         cX, cY = x + w // 2, y + h // 2
                     
                     centers.append((cX, cY))
@@ -114,36 +178,39 @@ def process_image(image_data, return_image=False, detect_lines=False):
         
         # Detect lines if requested and we have enough objects
         if detect_lines and len(centers) >= 3:
-            # Group centers into lines
             lines_detected, line_counts = detect_seed_lines(centers, vis_img)
         
         # Draw contours and labels on the visualization image
         for i, contour in enumerate(valid_contours):
-            # Draw contour
+            # Draw contour with different colors for better visibility
             cv2.drawContours(vis_img, [contour], 0, (0, 255, 0), 2)
             
-            # Get center of contour for label placement
+            # Get center and bounding rectangle
             M = cv2.moments(contour)
             if M["m00"] != 0:
                 cX = int(M["m10"] / M["m00"])
                 cY = int(M["m01"] / M["m00"])
             else:
-                # Fallback if moments calculation fails
                 x, y, w, h = cv2.boundingRect(contour)
                 cX, cY = x + w // 2, y + h // 2
+            
+            # Draw center point
+            cv2.circle(vis_img, (cX, cY), 3, (255, 0, 0), -1)
             
             # Draw label with number
             cv2.putText(
                 vis_img, 
-                str(i + 1),  # Number the objects starting from 1
-                (cX - 10, cY + 10),  # Position slightly offset from center
+                str(i + 1),
+                (cX - 10, cY + 15),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,  # Font scale
-                (255, 0, 0),  # Blue color
-                2  # Thickness
+                0.6,
+                (255, 0, 0),
+                2
             )
         
-        # No training code needed
+        # Add debug information to the image
+        cv2.putText(vis_img, f"Detected: {seed_count} choley", (10, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
         
         if return_image:
             # Convert the visualization image to base64
@@ -171,10 +238,7 @@ def process_image(image_data, return_image=False, detect_lines=False):
 
 def detect_seed_lines(centers, vis_img=None):
     """
-    Detect lines of seeds from their center points
-    Returns:
-    - lines_detected: List of lists, each containing points in a line
-    - line_counts: List of integers, number of seeds in each line
+    Detect lines of seeds from their center points (unchanged from original)
     """
     if len(centers) < 3:
         return [], []
@@ -210,7 +274,6 @@ def detect_seed_lines(centers, vis_img=None):
         nearby_points = points[nearby_indices]
         
         # Use RANSAC to find the best line
-        # This is a simplified version - in a real app you might use sklearn's RANSAC
         best_line = None
         best_inliers = []
         best_score = 0
